@@ -2,6 +2,8 @@
 
 Add page-aligned sign-language videos to an ADT **after** the ADT has been edited with Codex.
 
+**Use the browser app:** <https://elasticsounds.github.io/adt-sign-video-tool/>
+
 ## Browser / GitHub Pages edition
 
 The self-contained static app is in [`docs/`](docs/). It adds a project home screen where a user can choose a local ADT folder, batch-optimize incoming videos with FFmpeg WebAssembly, match them to pages, save back to the connected folder in a supported browser, or download the complete updated ADT as a ZIP.

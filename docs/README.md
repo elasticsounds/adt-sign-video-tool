@@ -2,6 +2,8 @@
 
 This folder is a self-contained static web app. It has no server, database, build step, or external JavaScript dependency. Its bundled FFmpeg WebAssembly engine performs video optimization locally in the browser.
 
+**Live app:** <https://elasticsounds.github.io/adt-sign-video-tool/>
+
 ## Publish on GitHub Pages
 
 1. Push the repository to GitHub's `main` branch.
