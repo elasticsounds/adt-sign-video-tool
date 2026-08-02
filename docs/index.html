@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#087f72">
+  <meta name="description" content="Add page-aligned sign-language video to an ADT without uploading project files.">
+  <title>ADT Sign Video Tool</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23087f72'/%3E%3Cpath d='M18 15h28a3 3 0 013 3v28a3 3 0 01-3 3H18a3 3 0 01-3-3V18a3 3 0 013-3Zm9 11v12l11-6-11-6Z' fill='none' stroke='white' stroke-width='4' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="#" id="brand-home" aria-label="ADT Sign Video Tool home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M6.5 4.75h11A1.75 1.75 0 0 1 19.25 6.5v11a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75v-11A1.75 1.75 0 0 1 6.5 4.75Z"/><path d="m10 8.75 5 3.25-5 3.25v-6.5Z"/></svg>
+      </span>
+      <span><strong>ADT</strong><small>Sign Video Tool</small></span>
+    </a>
+    <div class="project-heading hidden" id="project-heading">
+      <span>Current textbook</span>
+      <strong id="project-title">Untitled ADT</strong>
+      <small id="project-location">Local project</small>
+    </div>
+    <div class="header-actions hidden" id="header-actions">
+      <button class="button secondary" id="change-project">Change project</button>
+      <button class="button secondary" id="save-project">Save to folder</button>
+      <button class="button primary" id="download-project">Download ADT ZIP</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="home-view" id="home-view">
+      <div class="home-hero">
+        <div class="eyebrow">Browser edition</div>
+        <h1>Add sign-language video to an ADT, locally.</h1>
+        <p>Choose an unpacked ADT folder, connect videos to textbook pages, then save back to the folder or download the complete updated ADT. Project files stay on this computer.</p>
+        <div class="home-actions">
+          <button class="button primary large" id="open-local-folder">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.75 6.75h6l1.5 2h9v8.5a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2V6.75Z"/><path d="M3.75 8.75h16.5"/></svg>
+            Open local ADT folder
+          </button>
+          <label class="button secondary large" for="folder-fallback" id="fallback-label">
+            Choose folder (compatible mode)
+          </label>
+          <input id="folder-fallback" type="file" webkitdirectory multiple hidden>
+        </div>
+        <p class="compatibility" id="compatibility-note"></p>
+      </div>
+
+      <div class="home-features" aria-label="How it works">
+        <article><span class="feature-icon">1</span><h2>Choose an ADT</h2><p>Open any unpacked ADT folder from your computer. Nothing is sent to a server.</p></article>
+        <article><span class="feature-icon">2</span><h2>Match the videos</h2><p>Browse the page list, preview existing or incoming video, and assign each clip.</p></article>
+        <article><span class="feature-icon">3</span><h2>Save or download</h2><p>Write changes back with permission, or download a complete updated ADT ZIP.</p></article>
+      </div>
+
+      <aside class="browser-boundary">
+        <strong>Video optimization runs entirely in the browser.</strong>
+        <span>Batch-convert MP4, WebM, MOV, M4V, AVI, or MKV recordings to the ADT sign-language preset, with audio kept by default. Files are not uploaded.</span>
+      </aside>
+    </section>
+
+    <section class="workspace hidden" id="workspace-view">
+      <aside class="page-panel">
+        <div class="panel-heading">
+          <div><span class="eyebrow">ADT structure</span><h2>Page–video map</h2></div>
+          <span class="count" id="page-count">0</span>
+        </div>
+        <p class="panel-summary" id="page-summary"></p>
+        <div class="segmented" id="page-filters" role="group" aria-label="Filter pages">
+          <button class="active" data-filter="all">All</button>
+          <button data-filter="linked">In ADT</button>
+          <button data-filter="incoming">Incoming</button>
+          <button data-filter="missing">Missing</button>
+        </div>
+        <label class="search-field"><span aria-hidden="true">⌕</span><input id="page-search" type="search" placeholder="Find a page or video…"></label>
+        <div class="page-list" id="page-list"></div>
+      </aside>
+
+      <section class="review-panel">
+        <div class="review-heading">
+          <div><span class="eyebrow">Review workspace</span><h1 id="selected-page-title">Choose a page</h1><p id="selected-page-meta"></p></div>
+          <button class="button secondary" id="assign-selected">Assign selected clip here</button>
+        </div>
+        <div class="page-preview">
+          <div class="preview-label"><span>Textbook</span><strong>ADT page</strong></div>
+          <div class="page-paper" id="page-paper">
+            <div class="page-copy"><h2>Select a page to preview its text.</h2></div>
+          </div>
+          <footer class="page-nav">
+            <span id="page-nav-title">—</span>
+            <div><button id="previous-page" aria-label="Previous page">‹</button><strong id="page-position">0/0</strong><button id="next-page" aria-label="Next page">›</button></div>
+          </footer>
+        </div>
+      </section>
+
+      <aside class="media-panel">
+        <section class="video-preview-card">
+          <div class="video-preview-heading">
+            <div><span class="status-chip" id="preview-status">No video</span><strong id="preview-name">Choose a video below</strong></div>
+            <span id="preview-duration">—</span>
+          </div>
+          <div class="video-stage" id="video-stage">
+            <video id="video-player" controls playsinline></video>
+            <div class="video-empty" id="video-empty"><span>▶</span><p>Select an existing or incoming video to preview it.</p></div>
+          </div>
+        </section>
+
+        <section class="media-browser">
+          <div class="panel-heading compact">
+            <div><span class="eyebrow">Project media</span><h2>Video browser</h2></div>
+            <span class="count" id="media-count">0</span>
+          </div>
+          <p class="panel-summary" id="media-summary"></p>
+          <div class="media-actions">
+            <label class="button primary" for="add-videos">Add videos</label>
+            <label class="button secondary" for="add-video-folder">Add a folder</label>
+            <input id="add-videos" type="file" accept="video/*,.mp4,.webm,.mov,.m4v,.avi,.mkv" multiple hidden>
+            <input id="add-video-folder" type="file" accept="video/*,.mp4,.webm,.mov,.m4v,.avi,.mkv" webkitdirectory multiple hidden>
+          </div>
+          <section class="optimizer-panel" aria-labelledby="optimizer-title">
+            <div class="optimizer-heading">
+              <div><span class="optimizer-icon" aria-hidden="true">↯</span><div><strong id="optimizer-title">Optimize video</strong><small>H.264 MP4 · max 960 px · 30 fps</small></div></div>
+              <span class="engine-state" id="engine-state">Loads when needed</span>
+            </div>
+            <fieldset>
+              <legend>Audio in optimized videos</legend>
+              <label><input type="radio" name="optimize-audio" value="keep" checked><span><strong>Keep audio</strong><small>Recommended for voice-over</small></span></label>
+              <label><input type="radio" name="optimize-audio" value="remove"><span><strong>Remove audio</strong><small>Video only</small></span></label>
+            </fieldset>
+            <div class="optimizer-actions">
+              <button class="button secondary" id="optimize-selected">Optimize selected</button>
+              <button class="button primary" id="optimize-all">Optimize all incoming</button>
+            </div>
+            <div class="batch-progress hidden" id="batch-progress">
+              <div><strong id="batch-progress-title">Preparing optimizer…</strong><span id="batch-progress-value">0%</span></div>
+              <span class="progress-track"><span id="batch-progress-bar"></span></span>
+              <small id="batch-progress-detail">The first run downloads the local video engine.</small>
+            </div>
+          </section>
+          <div class="segmented" id="media-filters" role="group" aria-label="Filter videos">
+            <button class="active" data-filter="all">All</button>
+            <button data-filter="incoming">Incoming</button>
+            <button data-filter="existing">In ADT</button>
+          </div>
+          <div class="media-list" id="media-list"></div>
+        </section>
+
+        <section class="clip-editor" id="clip-editor">
+          <div class="editor-heading"><div><span class="eyebrow">Selected clip</span><h3 id="editor-name">No video selected</h3></div><button class="icon-button hidden" id="remove-incoming" title="Remove incoming video" aria-label="Remove incoming video">×</button></div>
+          <label>Assign to ADT page<select id="assignment-select"><option value="">Choose a page…</option></select></label>
+          <p class="editor-help" id="editor-help">Select an incoming video to assign it to a page.</p>
+          <div class="language-box"><strong>Copy to languages</strong><div id="language-options"></div></div>
+          <button class="button primary full" id="apply-project">Apply assigned videos</button>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <dialog id="media-info-dialog">
+    <form method="dialog" class="dialog-card">
+      <div class="dialog-heading"><div><span class="eyebrow">Media information</span><h2 id="info-title">Video details</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+      <dl id="media-info"></dl>
+    </form>
+  </dialog>
+
+  <div class="toast-region" id="toast-region" aria-live="polite"></div>
+  <div class="busy hidden" id="busy-overlay" role="status" aria-live="polite">
+    <div><span class="spinner"></span><strong id="busy-title">Opening project…</strong><p id="busy-detail">Reading local files</p></div>
+  </div>
+
+  <script>
+    if (location.protocol === 'file:') {
+      document.querySelector('main').innerHTML = `
+        <section class="file-launch-warning">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M6.5 4.75h11A1.75 1.75 0 0 1 19.25 6.5v11a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75v-11A1.75 1.75 0 0 1 6.5 4.75Z"/><path d="m10 8.75 5 3.25-5 3.25v-6.5Z"/></svg>
+          </div>
+          <div class="eyebrow">One more step</div>
+          <h1>Launch the browser tool first</h1>
+          <p>Chrome cannot run the video optimizer when this HTML file is opened directly. Close this tab, then double-click:</p>
+          <div class="launcher-name">Open ADT Sign Video Tool.command</div>
+          <p class="launcher-help">Keep the Terminal window open while you use the tool. The launcher will open the correct local web address automatically.</p>
+        </section>`;
+      document.querySelector('.project-heading')?.classList.add('hidden');
+      document.querySelector('.header-actions')?.classList.add('hidden');
+    } else {
+      const application = document.createElement('script');
+      application.type = 'module';
+      application.src = './app.js';
+      document.body.append(application);
+    }
+  </script>
+</body>
+</html>

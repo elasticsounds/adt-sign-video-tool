@@ -1,0 +1,6 @@
+{
+  "title": "Browser Test ADT",
+  "bundleVersion": "1",
+  "languages": { "available": ["en"], "default": "en" },
+  "features": { "signLanguage": false }
+}
