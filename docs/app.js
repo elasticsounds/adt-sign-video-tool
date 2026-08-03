@@ -8,8 +8,9 @@ const els = {
   selectedPageMeta: $('#selected-page-meta'), pagePaper: $('#page-paper'), pageNavTitle: $('#page-nav-title'),
   pagePosition: $('#page-position'), previousPage: $('#previous-page'), nextPage: $('#next-page'),
   mediaCount: $('#media-count'), mediaSummary: $('#media-summary'),
-  mediaFilters: $('#media-filters'), mediaList: $('#media-list'), videoPlayer: $('#video-player'),
-  videoEmpty: $('#video-empty'), previewStatus: $('#preview-status'), previewName: $('#preview-name'),
+  mediaPanel: $('#media-panel'), mediaFilters: $('#media-filters'), incomingMediaList: $('#incoming-media-list'),
+  existingMediaList: $('#existing-media-list'), mediaEmpty: $('#media-empty'), optimizerPanel: $('#optimizer-panel'), videoPlayer: $('#video-player'),
+  videoEmpty: $('#video-empty'), videoEmptyText: $('#video-empty-text'), previewStatus: $('#preview-status'), previewName: $('#preview-name'),
   previewDuration: $('#preview-duration'), addVideos: $('#add-videos'), addVideoFolder: $('#add-video-folder'),
   engineState: $('#engine-state'), optimizeSelected: $('#optimize-selected'), optimizeAll: $('#optimize-all'),
   batchProgress: $('#batch-progress'), batchProgressTitle: $('#batch-progress-title'),
@@ -497,6 +498,7 @@ async function renderSelectedPage() {
   const existingForPage = state.existing.find((media) => media.pageIds.includes(page.sectionId));
   if (incomingForPage && state.selectedMediaId !== incomingForPage.id) selectMedia(incomingForPage.id);
   else if (!currentMedia() && existingForPage) selectMedia(existingForPage.id);
+  else if (!incomingForPage && !existingForPage && !currentMedia()) selectMedia('', false);
 }
 
 function mediaNeedsOptimization(media) {
@@ -529,14 +531,10 @@ function renderMediaList() {
   const filtered = items.filter((item) => state.mediaFilter === 'all'
     || (state.mediaFilter === 'incoming' && item.kind === 'incoming')
     || (state.mediaFilter === 'existing' && item.kind === 'existing'));
-  const groups = [
-    ['incoming', 'Incoming to import', filtered.filter((item) => item.kind === 'incoming')],
-    ['existing', 'Existing in ADT', filtered.filter((item) => item.kind === 'existing')]
-  ].filter(([, , rows]) => rows.length);
-  let globalIndex = 0;
-  els.mediaList.innerHTML = groups.map(([kind, title, rows]) => {
+  const renderGroup = (kind, title, rows) => {
+    if (!rows.length) return '';
     const content = rows.map((media) => {
-      globalIndex += 1;
+      const globalIndex = items.indexOf(media) + 1;
       const pageIds = media.kind === 'incoming' ? (media.pageId ? [media.pageId] : []) : media.pageIds;
       const page = state.pages.find((candidate) => candidate.sectionId === pageIds[0]);
       const linked = pageIds.length > 0;
@@ -572,23 +570,28 @@ function renderMediaList() {
     }).join('');
     const open = state.openMediaGroups.has(kind) ? ' open' : '';
     return `<details class="media-group" data-media-group="${kind}"${open}><summary class="media-group-title"><span>${title} (${rows.length})</span><span class="disclosure" aria-hidden="true">⌄</span></summary><div class="media-group-content">${content}</div></details>`;
-  }).join('') || '<p class="panel-summary">No videos in this view.</p>';
+  };
+  const incomingRows = filtered.filter((item) => item.kind === 'incoming');
+  const existingRows = filtered.filter((item) => item.kind === 'existing');
+  els.incomingMediaList.innerHTML = renderGroup('incoming', 'Incoming to import', incomingRows);
+  els.existingMediaList.innerHTML = renderGroup('existing', 'Existing in ADT', existingRows);
+  els.mediaEmpty.classList.toggle('hidden', Boolean(incomingRows.length || existingRows.length));
+  els.optimizerPanel.classList.toggle('hidden', state.mediaFilter === 'existing' || !state.incoming.length);
 }
 
 function updateAssignmentAction() {
   const media = currentMedia();
   const editable = media?.kind === 'incoming';
   const targetId = els.assignmentSelect.value;
-  const targetPage = state.pages.find((page) => page.sectionId === targetId);
   els.assignmentAction.disabled = !editable || state.optimizing || targetId === (media?.pageId || '');
   if (!editable) {
     els.assignmentAction.textContent = media ? 'Existing ADT video is read-only' : 'Select an incoming video';
   } else if (!targetId) {
     els.assignmentAction.textContent = media.pageId ? 'Remove page assignment' : 'Leave video unassigned';
   } else if (targetId === media.pageId) {
-    els.assignmentAction.textContent = `Assigned to ${targetPage?.position || ''}. ${targetPage?.title || targetId}`;
+    els.assignmentAction.textContent = 'Selected video assigned to page';
   } else {
-    els.assignmentAction.textContent = `${media.pageId ? 'Move' : 'Assign'} video to ${targetPage?.position || ''}. ${targetPage?.title || targetId}`;
+    els.assignmentAction.textContent = 'Assign selected video to page';
   }
 }
 
@@ -672,7 +675,12 @@ async function selectMedia(id, rerender = true) {
     els.videoEmpty.classList.remove('hidden');
     els.previewStatus.className = 'status-chip missing';
     els.previewStatus.textContent = media?.missing ? 'Missing file' : 'No video';
-    els.previewName.textContent = media?.filename || 'Choose a video below';
+    const page = currentPage();
+    els.previewName.textContent = media?.filename || (page ? 'No video attached' : 'Choose a video below');
+    els.videoEmptyText.textContent = media?.missing
+      ? 'The ADT references this video, but the file could not be found.'
+      : page ? `No video is attached to ${page.title}. Select an incoming video below to preview it.`
+        : 'Select an existing or incoming video to preview it.';
     els.previewDuration.textContent = '—';
     return;
   }
@@ -1057,7 +1065,7 @@ function assignMediaToPage(media, pageId, { method = 'manual', reason = 'selecte
     displaced.assignmentReason = '';
   }
   media.pageId = pageId;
-  media.assignmentTarget = pageId;
+  media.assignmentTarget = pageId || undefined;
   media.assignmentMethod = pageId ? method : '';
   media.assignmentReason = pageId ? reason : '';
   if (pageId) state.selectedPageId = pageId;
@@ -1445,7 +1453,7 @@ function selectPage(pageId) {
   const existing = state.existing.find((media) => media.pageIds.includes(pageId));
   const media = incoming || existing;
   if (media) selectMedia(media.id);
-  else renderEditor();
+  else selectMedia('');
   renderPageList();
   renderSelectedPage();
 }
@@ -1495,13 +1503,13 @@ els.pageList.addEventListener('click', (event) => {
   const row = event.target.closest('[data-page-id]');
   if (row) selectPage(row.dataset.pageId);
 });
-els.mediaList.addEventListener('click', (event) => {
+els.mediaPanel.addEventListener('click', (event) => {
   const info = event.target.closest('[data-info-id]');
   if (info) { event.stopPropagation(); showMediaInfo(info.dataset.infoId); return; }
   const row = event.target.closest('[data-media-id]');
   if (row) selectMedia(row.dataset.mediaId);
 });
-els.mediaList.addEventListener('toggle', (event) => {
+els.mediaPanel.addEventListener('toggle', (event) => {
   const group = event.target.closest?.('[data-media-group]');
   if (!group) return;
   if (group.open) state.openMediaGroups.add(group.dataset.mediaGroup);
@@ -1531,6 +1539,16 @@ els.languageOptions.addEventListener('change', (event) => {
 els.previousPage.addEventListener('click', () => movePage(-1));
 els.nextPage.addEventListener('click', () => movePage(1));
 els.videoPlayer.addEventListener('loadedmetadata', () => { els.previewDuration.textContent = formatDuration(els.videoPlayer.duration); });
+
+let mediaScrollFrame = 0;
+function updateStickyVideoPreview() {
+  mediaScrollFrame = 0;
+  els.mediaPanel.classList.toggle('video-pip', els.mediaPanel.scrollTop > 120 && window.innerWidth > 900);
+}
+els.mediaPanel.addEventListener('scroll', () => {
+  if (!mediaScrollFrame) mediaScrollFrame = requestAnimationFrame(updateStickyVideoPreview);
+}, { passive: true });
+window.addEventListener('resize', updateStickyVideoPreview);
 
 if (window.showDirectoryPicker && window.isSecureContext) {
   els.compatibility.textContent = 'Direct folder save is available in this browser. You can also use compatible mode and download a ZIP.';
