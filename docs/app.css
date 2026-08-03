@@ -211,6 +211,9 @@ button, label[for] { -webkit-tap-highlight-color: transparent; }
 .clip-editor select:disabled { background: #f4f6f5; color: #93a19e; }
 .editor-help { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .assignment-context { margin-bottom: 11px; padding: 9px 10px; border-radius: 9px; background: var(--soft); color: #536763; font-size: 10px; line-height: 1.4; }
+.assignment-notice { padding: 12px; border: 1px solid #b9ded6; border-radius: 10px; background: var(--green-soft); color: var(--green-dark); }
+.assignment-notice strong { display: block; font-size: 12px; }
+.assignment-notice p { margin: 5px 0 0; color: #47665f; font-size: 10px; line-height: 1.5; }
 .assignment-summary { margin-top: 10px; padding: 9px 10px; border-radius: 9px; background: var(--green-soft); color: var(--green-dark); font-size: 10px; font-weight: 750; line-height: 1.4; }
 .language-box { border-radius: 10px; padding: 11px; background: var(--soft); margin-top: 12px; }
 .language-box strong { font-size: 11px; }

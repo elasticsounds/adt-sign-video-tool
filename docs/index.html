@@ -150,11 +150,17 @@
           <summary class="editor-heading"><div><span class="eyebrow">Selected video &amp; page</span><h3 id="editor-name">No video selected</h3></div><span class="disclosure" aria-hidden="true">⌄</span></summary>
           <div class="collapsible-content">
             <div class="assignment-context" id="assignment-context">Select a page on the left, then choose an incoming video.</div>
-            <label>Page for this video<select id="assignment-select"><option value="">Leave unassigned</option></select></label>
-            <button class="button primary full" id="assignment-action">Select an incoming video</button>
-            <p class="editor-help" id="editor-help">The page selected on the left will be preselected here.</p>
+            <div id="assignment-fields">
+              <label>Page for this video<select id="assignment-select"><option value="">Leave unassigned</option></select></label>
+              <button class="button primary full" id="assignment-action">Assign selected video to page</button>
+              <p class="editor-help" id="editor-help">The page selected on the left will be preselected here.</p>
+            </div>
+            <div class="assignment-notice hidden" id="assignment-notice">
+              <strong id="assignment-notice-title">Already in the ADT</strong>
+              <p id="assignment-notice-text"></p>
+            </div>
             <div class="assignment-summary" id="assignment-summary">No staged video assignments.</div>
-            <div class="language-box"><strong>Copy to languages</strong><div id="language-options"></div></div>
+            <div class="language-box" id="language-box"><strong>Copy to languages</strong><div id="language-options"></div></div>
           </div>
         </details>
       </aside>

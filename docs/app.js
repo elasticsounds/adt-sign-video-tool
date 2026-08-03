@@ -18,7 +18,9 @@ const els = {
   batchProgressDetail: $('#batch-progress-detail'),
   editorName: $('#editor-name'), assignmentSelect: $('#assignment-select'), assignmentAction: $('#assignment-action'),
   assignmentContext: $('#assignment-context'), assignmentSummary: $('#assignment-summary'), editorHelp: $('#editor-help'),
-  languageOptions: $('#language-options'),
+  assignmentFields: $('#assignment-fields'), assignmentNotice: $('#assignment-notice'),
+  assignmentNoticeTitle: $('#assignment-notice-title'), assignmentNoticeText: $('#assignment-notice-text'),
+  languageBox: $('#language-box'), languageOptions: $('#language-options'),
   saveProject: $('#save-project'), downloadProject: $('#download-project'), changeProject: $('#change-project'),
   brandHome: $('#brand-home'), infoDialog: $('#media-info-dialog'), infoTitle: $('#info-title'),
   mediaInfo: $('#media-info'), busy: $('#busy-overlay'), busyTitle: $('#busy-title'),
@@ -710,9 +712,8 @@ function updateAssignmentAction() {
   const editable = media?.kind === 'incoming';
   const targetId = els.assignmentSelect.value;
   els.assignmentAction.disabled = !editable || state.optimizing || targetId === (media?.pageId || '');
-  if (!editable) {
-    els.assignmentAction.textContent = media ? 'Existing ADT video is read-only' : 'Select an incoming video';
-  } else if (!targetId) {
+  if (!editable) return;
+  if (!targetId) {
     els.assignmentAction.textContent = media.pageId ? 'Remove page assignment' : 'Leave video unassigned';
   } else if (targetId === media.pageId) {
     els.assignmentAction.textContent = 'Selected video assigned to page';
@@ -729,6 +730,9 @@ function renderEditor() {
     ? (media.assignmentTarget !== undefined ? media.assignmentTarget : (media.pageId || page?.sectionId || ''))
     : '';
   els.editorName.textContent = media?.filename || 'No video selected';
+  els.assignmentFields.classList.toggle('hidden', !editable);
+  els.assignmentNotice.classList.toggle('hidden', editable);
+  els.languageBox.classList.toggle('hidden', !editable);
   els.assignmentSelect.disabled = !editable;
   els.assignmentContext.textContent = page
     ? `Selected on the left: ${page.position}. ${page.title} · ${page.sectionId}`
@@ -747,6 +751,21 @@ function renderEditor() {
     els.editorHelp.textContent = media
       ? 'Existing ADT media is read-only here. Select an incoming video to replace or add a page video.'
       : 'Select an incoming video from the browser above.';
+  }
+  if (!editable) {
+    const linkedPages = media?.kind === 'existing'
+      ? media.pageIds.map((id) => state.pages.find((candidate) => candidate.sectionId === id)?.title || id)
+      : [];
+    if (media?.kind === 'existing' && linkedPages.length) {
+      els.assignmentNoticeTitle.textContent = `Already attached to ${linkedPages.join(', ')}`;
+      els.assignmentNoticeText.textContent = 'To replace it, select an incoming video above. To remove it, click this video’s trash icon: the first click unlinks it from the page, and the second deletes the file.';
+    } else if (media?.kind === 'existing') {
+      els.assignmentNoticeTitle.textContent = 'This video is not attached to a page';
+      els.assignmentNoticeText.textContent = 'It has already been unlinked. Click this video’s trash icon once more to delete the file.';
+    } else {
+      els.assignmentNoticeTitle.textContent = 'Choose an incoming video';
+      els.assignmentNoticeText.textContent = 'Select a video from Incoming to import above, then assign it to the page selected on the left.';
+    }
   }
   const assigned = state.incoming.filter((item) => item.pageId);
   const pendingOptimization = assigned.filter(mediaNeedsOptimization).length;
