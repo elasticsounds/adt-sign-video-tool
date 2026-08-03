@@ -6,7 +6,7 @@ Add page-aligned sign-language videos to an ADT **after** the ADT has been edite
 
 ## Browser / GitHub Pages edition
 
-The self-contained static app is in [`docs/`](docs/). It adds a project home screen where a user can choose a local ADT folder, batch-optimize incoming videos with FFmpeg WebAssembly, match them to pages, save back to the connected folder in a supported browser, or download the complete updated ADT as a ZIP.
+The self-contained static app is in [`docs/`](docs/). It adds a project home screen where a user can choose a local ADT folder, use the project's real ADT Reader interface, batch-optimize incoming videos with FFmpeg WebAssembly, match them to pages, save back to the connected folder in a supported browser, or download the complete updated ADT as a ZIP.
 
 No ADT files are uploaded. To test it locally:
 
@@ -22,7 +22,7 @@ Then open <http://localhost:8080>. GitHub Pages deployment is automated by [`.gi
 
 The static edition uses one sign-language preset: H.264 MP4, maximum 960 px, 30 fps, CRF 24, with voice-over audio kept by default as mono AAC. Users can choose to remove audio. Use the Python app when frame-accurate trimming or Whisper transcription is needed.
 
-When a video folder is added, the browser edition auto-matches unique pages using prior import records, section IDs, video/page indexes, and page titles. Matches remain staged and reviewable; **Save to folder** or **Download ADT ZIP** writes every staged assignment into the ADT.
+When videos are added, the browser edition can auto-match all unassigned clips using prior import records, section IDs, video/page indexes, and page titles. Matches remain staged and reviewable; **Save to folder** or **Download ADT ZIP** writes every staged assignment into the ADT. Existing videos can be unlinked and deleted from their row, or cleared as a single batch with **Delete all videos**.
 
 The tool understands the exported ADT format used by the included *Weather and Climate Reader* sample:
 

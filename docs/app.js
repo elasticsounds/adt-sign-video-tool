@@ -5,20 +5,20 @@ const els = {
   openFolder: $('#open-local-folder'), fallback: $('#folder-fallback'), compatibility: $('#compatibility-note'),
   pageCount: $('#page-count'), pageSummary: $('#page-summary'), pageFilters: $('#page-filters'),
   pageSearch: $('#page-search'), pageList: $('#page-list'), selectedPageTitle: $('#selected-page-title'),
-  selectedPageMeta: $('#selected-page-meta'), pagePaper: $('#page-paper'), pageNavTitle: $('#page-nav-title'),
-  pagePosition: $('#page-position'), previousPage: $('#previous-page'), nextPage: $('#next-page'),
+  selectedPageMeta: $('#selected-page-meta'), readerFrame: $('#adt-reader-frame'), readerState: $('#reader-state'),
   mediaCount: $('#media-count'), mediaSummary: $('#media-summary'),
   mediaPanel: $('#media-panel'), mediaFilters: $('#media-filters'), incomingMediaList: $('#incoming-media-list'),
   existingMediaList: $('#existing-media-list'), mediaEmpty: $('#media-empty'), optimizerPanel: $('#optimizer-panel'), videoPlayer: $('#video-player'),
   videoEmpty: $('#video-empty'), videoEmptyText: $('#video-empty-text'), previewStatus: $('#preview-status'), previewName: $('#preview-name'),
   previewDuration: $('#preview-duration'), addVideos: $('#add-videos'), addVideoFolder: $('#add-video-folder'),
+  autoAssignAll: $('#auto-assign-all'), deleteAllVideos: $('#delete-all-videos'),
   engineState: $('#engine-state'), optimizeSelected: $('#optimize-selected'), optimizeAll: $('#optimize-all'),
   batchProgress: $('#batch-progress'), batchProgressTitle: $('#batch-progress-title'),
   batchProgressValue: $('#batch-progress-value'), batchProgressBar: $('#batch-progress-bar'),
   batchProgressDetail: $('#batch-progress-detail'),
   editorName: $('#editor-name'), assignmentSelect: $('#assignment-select'), assignmentAction: $('#assignment-action'),
   assignmentContext: $('#assignment-context'), assignmentSummary: $('#assignment-summary'), editorHelp: $('#editor-help'),
-  removeIncoming: $('#remove-incoming'), languageOptions: $('#language-options'),
+  languageOptions: $('#language-options'),
   saveProject: $('#save-project'), downloadProject: $('#download-project'), changeProject: $('#change-project'),
   brandHome: $('#brand-home'), infoDialog: $('#media-info-dialog'), infoTitle: $('#info-title'),
   mediaInfo: $('#media-info'), busy: $('#busy-overlay'), busyTitle: $('#busy-title'),
@@ -31,6 +31,7 @@ const state = {
   rootName: '',
   files: new Map(),
   overrides: new Map(),
+  deletions: new Set(),
   config: {},
   pages: [],
   languages: [],
@@ -45,9 +46,10 @@ const state = {
   pageFilter: 'all',
   mediaFilter: 'all',
   openMediaGroups: new Set(['incoming', 'existing']),
-  pageImageUrl: '',
   previewUrl: '',
   previewToken: 0,
+  readerSessionId: '',
+  readerBridgeUrl: '',
   audioMode: 'keep',
   optimizing: false,
   batchProgress: null,
@@ -64,6 +66,7 @@ let activeOptimization = null;
 let optimizerRenderPending = false;
 let optimizerLastLog = '';
 let optimizerLoadError = '';
+let readerServiceWorkerPromise = null;
 
 function normalizePath(path) {
   return String(path).replaceAll('\\', '/').replace(/^\.\//, '').replace(/^\/+|\/+$/g, '');
@@ -140,11 +143,14 @@ function currentMedia() {
 }
 
 function listProjectPaths() {
-  return [...new Set([...state.files.keys(), ...state.overrides.keys()])].sort(naturalCompare);
+  return [...new Set([...state.files.keys(), ...state.overrides.keys()])]
+    .filter((path) => !state.deletions.has(path))
+    .sort(naturalCompare);
 }
 
 async function getProjectBlob(path) {
   const normalized = normalizePath(path);
+  if (state.deletions.has(normalized)) throw new Error(`Project file was deleted: ${normalized}`);
   if (state.overrides.has(normalized)) return state.overrides.get(normalized);
   const entry = state.files.get(normalized);
   if (!entry) throw new Error(`Project file is missing: ${normalized}`);
@@ -167,10 +173,158 @@ async function getProjectJson(path, fallback) {
   catch (error) { throw new Error(`Invalid JSON in ${path}: ${error.message}`); }
 }
 
+function contentTypeForPath(path, blob) {
+  if (blob?.type) return blob.type;
+  const types = {
+    html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8',
+    json: 'application/json; charset=utf-8', xml: 'application/xml; charset=utf-8', txt: 'text/plain; charset=utf-8',
+    mp4: 'video/mp4', webm: 'video/webm', mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg',
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+    woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', ico: 'image/x-icon'
+  };
+  return types[fileExtension(path)] || 'application/octet-stream';
+}
+
+function showReaderState(mode, title, detail) {
+  els.readerState.className = `reader-state ${mode}`.trim();
+  if (mode !== 'ready') els.readerFrame.parentElement.querySelector('.reader-sign-bridge-hit')?.remove();
+  if (mode === 'ready') return;
+  els.readerState.innerHTML = `${mode === 'error' ? '' : '<span class="spinner"></span>'}<strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail)}</small>`;
+}
+
+function ensureReaderServiceWorker() {
+  if (!('serviceWorker' in navigator) || !/^https?:$/.test(location.protocol)) {
+    return Promise.reject(new Error('The embedded ADT Reader requires the tool to be opened from GitHub Pages or the local launcher.'));
+  }
+  if (!readerServiceWorkerPromise) {
+    readerServiceWorkerPromise = navigator.serviceWorker.register('./adt-reader-sw.js', { scope: './' })
+      .then(() => navigator.serviceWorker.ready);
+  }
+  return readerServiceWorkerPromise;
+}
+
+function readerProjectUrl(page) {
+  if (!state.readerSessionId) state.readerSessionId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  const root = new URL('./', location.href);
+  const path = normalizePath(page.href).split('/').map(encodeURIComponent).join('/');
+  const url = new URL(`__adt_reader__/${encodeURIComponent(state.readerSessionId)}/${path}`, root);
+  url.searchParams.set('adtPreview', '1');
+  url.searchParams.set('v', state.config.bundleVersion || '1');
+  return url.href;
+}
+
+function closeBridgedReaderVideo(documentNode, button) {
+  documentNode.getElementById('adt-sign-video-bridge')?.remove();
+  if (state.readerBridgeUrl) URL.revokeObjectURL(state.readerBridgeUrl);
+  state.readerBridgeUrl = '';
+  button?.setAttribute('aria-pressed', 'false');
+}
+
+function toggleBridgedReaderVideo(sectionId) {
+  let documentNode;
+  try { documentNode = els.readerFrame.contentDocument; } catch { return; }
+  if (!documentNode) return;
+  const button = documentNode.querySelector('button[aria-label="Sign language"]');
+  if (!button) return;
+  if (documentNode.getElementById('adt-sign-video-bridge')) {
+    closeBridgedReaderVideo(documentNode, button);
+    return;
+  }
+  setTimeout(() => {
+    if (documentNode.querySelector('video') || documentNode.getElementById('adt-sign-video-bridge')) return;
+    const media = state.incoming.find((item) => item.pageId === sectionId)
+      || state.existing.find((item) => item.pageIds.includes(sectionId));
+    if (!media?.file) {
+      button.setAttribute('aria-pressed', 'false');
+      toast('No sign-language video is attached to this page.');
+      return;
+    }
+    closeBridgedReaderVideo(documentNode, button);
+    state.readerBridgeUrl = URL.createObjectURL(media.file);
+    const overlay = documentNode.createElement('section');
+    overlay.id = 'adt-sign-video-bridge';
+    overlay.setAttribute('aria-label', `Sign language video for ${currentPage()?.title || sectionId}`);
+    overlay.style.cssText = 'position:fixed;right:18px;bottom:76px;width:min(390px,calc(100vw - 36px));z-index:9999;border-radius:12px;overflow:hidden;background:#081513;box-shadow:0 14px 40px rgba(0,0,0,.32);border:2px solid white';
+    const close = documentNode.createElement('button');
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Close sign language video');
+    close.textContent = '×';
+    close.style.cssText = 'position:absolute;right:8px;top:8px;z-index:2;width:34px;height:34px;border:0;border-radius:50%;background:rgba(0,0,0,.72);color:white;font-size:22px;cursor:pointer';
+    const video = documentNode.createElement('video');
+    video.src = state.readerBridgeUrl;
+    video.controls = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    video.style.cssText = 'display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#081513';
+    close.addEventListener('click', (event) => {
+      event.stopPropagation();
+      closeBridgedReaderVideo(documentNode, button);
+    });
+    overlay.append(close, video);
+    documentNode.body.append(overlay);
+    button.setAttribute('aria-pressed', 'true');
+  }, 350);
+}
+
+function installReaderSignBridge(attempt = 0) {
+  let documentNode;
+  try { documentNode = els.readerFrame.contentDocument; } catch { return; }
+  if (!documentNode) return;
+  const button = documentNode.querySelector('button[aria-label="Sign language"]');
+  if (!button) {
+    if (attempt < 80) setTimeout(() => installReaderSignBridge(attempt + 1), 100);
+    return;
+  }
+  button.dataset.adtVideoBridge = 'true';
+  const preview = els.readerFrame.parentElement;
+  let hit = preview.querySelector('.reader-sign-bridge-hit');
+  if (!hit) {
+    hit = document.createElement('button');
+    hit.type = 'button';
+    hit.className = 'reader-sign-bridge-hit';
+    hit.setAttribute('aria-label', 'Open sign language video');
+    hit.title = 'Open sign language video';
+    hit.addEventListener('click', () => toggleBridgedReaderVideo(currentPage()?.sectionId || ''));
+    preview.append(hit);
+  }
+  const frameRect = els.readerFrame.getBoundingClientRect();
+  const previewRect = preview.getBoundingClientRect();
+  const buttonRect = button.getBoundingClientRect();
+  hit.style.left = `${frameRect.left - previewRect.left + buttonRect.left}px`;
+  hit.style.top = `${frameRect.top - previewRect.top + buttonRect.top}px`;
+  hit.style.width = `${buttonRect.width}px`;
+  hit.style.height = `${buttonRect.height}px`;
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', async (event) => {
+    const request = event.data;
+    const replyPort = event.ports?.[0];
+    if (request?.type !== 'adt-reader/request' || request.session !== state.readerSessionId || !replyPort) return;
+    try {
+      const blob = await getProjectBlob(request.path);
+      replyPort.postMessage({
+        ok: true, session: request.session, blob,
+        contentType: contentTypeForPath(request.path, blob)
+      });
+    } catch (error) {
+      replyPort.postMessage({ ok: false, session: request.session, status: 404, error: error.message });
+    }
+  });
+}
+
 function setOverride(path, value, type = 'application/octet-stream') {
   const normalized = normalizePath(path);
   const blob = value instanceof Blob ? value : new Blob([value], { type });
+  state.deletions.delete(normalized);
   state.overrides.set(normalized, blob);
+  setDirty(true);
+}
+
+function setDeletion(path) {
+  const normalized = normalizePath(path);
+  state.overrides.delete(normalized);
+  state.deletions.add(normalized);
   setDirty(true);
 }
 
@@ -262,17 +416,21 @@ async function openFallbackFiles(fileList) {
 }
 
 function resetProjectState() {
-  if (state.pageImageUrl) URL.revokeObjectURL(state.pageImageUrl);
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
+  if (state.readerBridgeUrl) URL.revokeObjectURL(state.readerBridgeUrl);
   Object.assign(state, {
-    mode: null, rootHandle: null, rootName: '', files: new Map(), overrides: new Map(),
+    mode: null, rootHandle: null, rootName: '', files: new Map(), overrides: new Map(), deletions: new Set(),
     config: {}, pages: [], languages: [], selectedLanguages: new Set(), manifests: new Map(),
     texts: {}, importMetadata: { version: 1, videos: {} }, existing: [], incoming: [],
     selectedPageId: '', selectedMediaId: '', pageFilter: 'all', mediaFilter: 'all',
     openMediaGroups: new Set(['incoming', 'existing']),
-    pageImageUrl: '', previewUrl: '', previewToken: 0, audioMode: 'keep', optimizing: false,
+    previewUrl: '', previewToken: 0, readerSessionId: '', readerBridgeUrl: '', audioMode: 'keep', optimizing: false,
     batchProgress: null, dirty: false
   });
+  els.readerFrame.removeAttribute('src');
+  delete els.readerFrame.dataset.readerKey;
+  els.readerFrame.parentElement.querySelector('.reader-sign-bridge-hit')?.remove();
+  els.readerState.className = 'reader-state';
   for (const input of document.querySelectorAll('input[name="optimize-audio"]')) input.checked = input.value === 'keep';
 }
 
@@ -311,7 +469,7 @@ async function loadProject() {
     ? state.selectedPageId : state.pages[0].sectionId;
   showWorkspace();
   renderAll();
-  setDirty(state.overrides.size > 0);
+  setDirty(state.overrides.size > 0 || state.deletions.size > 0);
 }
 
 async function rebuildExistingMedia() {
@@ -332,7 +490,7 @@ async function rebuildExistingMedia() {
   }
   for (const path of listProjectPaths()) {
     const match = path.match(/^content\/i18n\/([^/]+)\/video\/([^/]+)$/);
-    if (!match || !VIDEO_EXTENSIONS.has(fileExtension(match[2]))) continue;
+    if (!match || !VIDEO_INPUT_EXTENSIONS.has(fileExtension(match[2]))) continue;
     const [, language, filename] = match;
     if (!byFilename.has(filename)) byFilename.set(filename, { filename, languages: new Set(), pages: new Set(), ids: new Set() });
     byFilename.get(filename).languages.add(language);
@@ -352,6 +510,7 @@ async function rebuildExistingMedia() {
       id: `existing:${data.filename}:${index}`,
       kind: 'existing', filename: data.filename, path, file,
       pageId: pageIds[0] || '', pageIds, languages: [...data.languages], videoId: firstVideoId,
+      videoIds: [...data.ids].sort(naturalCompare),
       size: file?.size ?? null, modified: file?.lastModified ?? null,
       importedAt: importRow.imported_at || '', sourceName: importRow.source_name || '',
       preset: importRow.preset || '', audioMode: importRow.audio_mode || '', metadata: null,
@@ -428,77 +587,36 @@ function renderPageList() {
   }).join('') || '<p class="panel-summary">No pages match this filter.</p>';
 }
 
-async function renderSelectedPage() {
-  const page = currentPage();
+function updateSelectedPageHeading(page) {
   if (!page) return;
   els.selectedPageTitle.textContent = page.title;
   els.selectedPageMeta.textContent = `video-${page.position} · ${page.sectionId}${page.pageNumber === null ? '' : ` · print page ${page.pageNumber}`}`;
-  els.pageNavTitle.textContent = page.title;
-  els.pagePosition.textContent = `${page.position}/${state.pages.length}`;
-  els.previousPage.disabled = page.position === 1;
-  els.nextPage.disabled = page.position === state.pages.length;
-  if (state.pageImageUrl) { URL.revokeObjectURL(state.pageImageUrl); state.pageImageUrl = ''; }
-  const token = ++state.previewToken;
-  els.pagePaper.innerHTML = '<div class="page-copy"><h2>Loading page…</h2></div>';
-  try {
-    const html = await getProjectText(page.href);
-    const documentNode = new DOMParser().parseFromString(html, 'text/html');
-    const blocks = [];
-    const seen = new Set();
-    for (const node of documentNode.querySelectorAll('h1, h2, h3, h4, p, figcaption')) {
-      const pieces = [];
-      for (const translatable of node.querySelectorAll('[data-id]')) {
-        const id = translatable.dataset.id;
-        if (seen.has(id)) continue;
-        seen.add(id);
-        const value = state.texts[id] ?? translatable.textContent;
-        if (String(value).trim()) pieces.push(String(value).trim());
-      }
-      if (node.dataset.id && !seen.has(node.dataset.id)) {
-        seen.add(node.dataset.id);
-        const value = state.texts[node.dataset.id] ?? node.textContent;
-        if (String(value).trim()) pieces.push(String(value).trim());
-      }
-      const text = pieces.join(' ');
-      if (text) blocks.push({ heading: /^H/.test(node.tagName), text });
-    }
-    const headingIndex = blocks.findIndex((block) => block.heading);
-    const heading = headingIndex >= 0 ? blocks.splice(headingIndex, 1)[0].text : page.title;
-    const copy = document.createElement('div');
-    copy.className = 'page-copy';
-    const title = document.createElement('h2');
-    title.textContent = heading;
-    copy.append(title);
-    for (const block of blocks.slice(0, 14)) {
-      const paragraph = document.createElement('p');
-      paragraph.textContent = block.text;
-      copy.append(paragraph);
-    }
-    const firstImage = documentNode.querySelector('main img, #content img');
-    if (firstImage?.getAttribute('src')) {
-      const imagePath = normalizePath(new URL(firstImage.getAttribute('src'), `https://adt.local/${page.href}`).pathname);
-      try {
-        const imageBlob = await getProjectBlob(imagePath);
-        state.pageImageUrl = URL.createObjectURL(imageBlob);
-        const image = document.createElement('img');
-        image.className = 'page-image';
-        image.alt = firstImage.alt || '';
-        image.src = state.pageImageUrl;
-        copy.append(image);
-      } catch { /* Text preview remains useful if an image is missing. */ }
-    }
-    if (token === state.previewToken) {
-      els.pagePaper.replaceChildren(copy);
-      els.pagePaper.scrollTop = 0;
-    }
-  } catch (error) {
-    if (token === state.previewToken) els.pagePaper.innerHTML = `<div class="page-copy"><h2>${escapeHtml(page.title)}</h2><p>${escapeHtml(error.message)}</p></div>`;
-  }
+}
+
+async function renderSelectedPage() {
+  const page = currentPage();
+  if (!page) return;
+  updateSelectedPageHeading(page);
   const incomingForPage = state.incoming.find((media) => media.pageId === page.sectionId);
   const existingForPage = state.existing.find((media) => media.pageIds.includes(page.sectionId));
   if (incomingForPage && state.selectedMediaId !== incomingForPage.id) selectMedia(incomingForPage.id);
   else if (!currentMedia() && existingForPage) selectMedia(existingForPage.id);
   else if (!incomingForPage && !existingForPage && !currentMedia()) selectMedia('', false);
+
+  const token = ++state.previewToken;
+  try {
+    await ensureReaderServiceWorker();
+    if (token !== state.previewToken) return;
+    const url = readerProjectUrl(page);
+    const readerKey = `${state.readerSessionId}:${normalizePath(page.href)}:${state.config.bundleVersion || '1'}`;
+    if (els.readerFrame.dataset.readerKey !== readerKey) {
+      els.readerFrame.dataset.readerKey = readerKey;
+      showReaderState('', 'Opening the ADT Reader…', 'Loading reader controls, languages, text-to-speech, and sign language.');
+      els.readerFrame.src = url;
+    }
+  } catch (error) {
+    if (token === state.previewToken) showReaderState('error', 'Could not open the ADT Reader', error.message);
+  }
 }
 
 function mediaNeedsOptimization(media) {
@@ -525,9 +643,13 @@ function optimizationStatus(media) {
 
 function renderMediaList() {
   const items = [...state.incoming, ...state.existing];
+  const unassignedIncoming = state.incoming.filter((item) => !item.pageId).length;
   const unlinked = state.incoming.filter((item) => !item.pageId).length + state.existing.filter((item) => !item.pageIds.length).length;
   els.mediaCount.textContent = items.length;
   els.mediaSummary.textContent = `${state.existing.length} in ADT · ${state.incoming.length} incoming · ${unlinked} unlinked`;
+  els.autoAssignAll.disabled = !unassignedIncoming;
+  els.autoAssignAll.textContent = unassignedIncoming ? `Auto-assign all (${unassignedIncoming})` : 'All incoming assigned';
+  els.deleteAllVideos.disabled = !items.length;
   const filtered = items.filter((item) => state.mediaFilter === 'all'
     || (state.mediaFilter === 'incoming' && item.kind === 'incoming')
     || (state.mediaFilter === 'existing' && item.kind === 'existing'));
@@ -559,12 +681,16 @@ function renderMediaList() {
           : media.optimization.status === 'done' && media.metadata?.audio === false ? 'Source had no audio' : 'Audio kept';
         optimizationRow = `<span class="media-optimization"><small><span>${escapeHtml(detail)}</span><span>${escapeHtml(audioDetail)}</span></small>${media.optimization.status === 'optimizing' ? `<span class="progress-track"><span style="width:${progress}%"></span></span>` : ''}</span>`;
       }
+      const deleteLabel = media.kind === 'existing' && linked ? `Unlink ${media.filename} before deleting` : `Delete ${media.filename}`;
       return `<div class="media-row ${kind} ${media.id === state.selectedMediaId ? 'active' : ''}" data-media-id="${escapeHtml(media.id)}" tabindex="0">
         <span class="media-index">${globalIndex}</span>
         <span class="media-main"><strong>${escapeHtml(media.filename)}</strong><small>${linked ? escapeHtml(`${page?.title || pageIds[0]}${pageIds.length > 1 ? ` +${pageIds.length - 1}` : ''}`) : 'Not linked to a page'}</small>
         <span class="media-facts">${facts.map((fact) => `<span>• ${escapeHtml(fact)}</span>`).join('')}</span>
         <span class="status-chip ${linked ? 'linked' : 'unlinked'}"${assignmentTitle}>${linkLabel}</span>${optimizeStatus ? ` <span class="status-chip ${optimizeStatus.type}">${optimizeStatus.label}</span>` : ''}</span>
-        <button class="info-button" data-info-id="${escapeHtml(media.id)}" title="Media information" aria-label="Media information for ${escapeHtml(media.filename)}">i</button>
+        <span class="media-row-actions">
+          <button class="info-button" data-info-id="${escapeHtml(media.id)}" title="Media information" aria-label="Media information for ${escapeHtml(media.filename)}">i</button>
+          <button class="icon-button danger" data-delete-id="${escapeHtml(media.id)}" title="${escapeHtml(deleteLabel)}" aria-label="${escapeHtml(deleteLabel)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg></button>
+        </span>
         ${optimizationRow}
       </div>`;
     }).join('');
@@ -603,8 +729,6 @@ function renderEditor() {
     ? (media.assignmentTarget !== undefined ? media.assignmentTarget : (media.pageId || page?.sectionId || ''))
     : '';
   els.editorName.textContent = media?.filename || 'No video selected';
-  els.removeIncoming.classList.toggle('hidden', !editable);
-  els.removeIncoming.disabled = state.optimizing;
   els.assignmentSelect.disabled = !editable;
   els.assignmentContext.textContent = page
     ? `Selected on the left: ${page.position}. ${page.title} · ${page.sectionId}`
@@ -987,6 +1111,15 @@ function detectPageForFilename(filename) {
     return { pageId: page.sectionId, score: 850, reason: `video index ${position}` };
   }
 
+  const numericPositions = [...stem.matchAll(/(?:^|\D)0*(\d+)(?=\D|$)/g)]
+    .map((match) => Number(match[1]))
+    .filter((value, index, values) => value > 0 && value <= state.pages.length && values.indexOf(value) === index);
+  if (numericPositions.length === 1) {
+    const numericPosition = numericPositions[0];
+    const page = state.pages[numericPosition - 1];
+    return { pageId: page.sectionId, score: 740, reason: `filename index ${numericPosition}` };
+  }
+
   const titleMatches = state.pages.map((page) => {
     const title = matchText(page.title);
     if (!title) return null;
@@ -1053,6 +1186,31 @@ async function addIncomingFiles(fileList) {
   const matched = added.filter((media) => media.pageId).length;
   setDirty(true);
   toast(`Added ${files.length} incoming video${files.length === 1 ? '' : 's'} · ${matched} auto-assigned${files.length - matched ? ` · ${files.length - matched} need a page` : ''}. Review the matches, then optimize the batch.`);
+}
+
+function autoAssignAllIncoming() {
+  const pending = state.incoming.filter((media) => !media.pageId).sort((a, b) => naturalCompare(a.filename, b.filename));
+  if (!pending.length) {
+    toast('Every incoming video already has a page assignment.');
+    return;
+  }
+  const files = pending.map((media) => media.sourceFile || media.file);
+  const assignments = autoAssignmentsForFiles(files);
+  let matched = 0;
+  for (const media of pending) {
+    const match = assignments.get(media.sourceFile || media.file);
+    if (!match) continue;
+    media.pageId = match.pageId;
+    media.assignmentTarget = match.pageId;
+    media.assignmentMethod = 'auto';
+    media.assignmentReason = match.reason;
+    matched += 1;
+  }
+  if (matched) setDirty(true);
+  renderAll();
+  toast(matched
+    ? `Auto-assigned ${matched} incoming video${matched === 1 ? '' : 's'} by section ID, page title, or filename index.${pending.length > matched ? ` ${pending.length - matched} still need review.` : ''}`
+    : 'No confident page indexes, section IDs, or page titles were found in the unassigned filenames.', matched ? '' : 'error');
 }
 
 function assignMediaToPage(media, pageId, { method = 'manual', reason = 'selected by the user' } = {}) {
@@ -1126,6 +1284,99 @@ function nextBundleVersion(value) {
 
 function sortedManifest(manifest) {
   return Object.fromEntries(Object.entries(manifest).sort(([a], [b]) => naturalCompare(a, b)));
+}
+
+async function stageVideoCatalogChanges() {
+  for (const language of state.languages) {
+    setOverride(`content/i18n/${language}/videos.json`, jsonText(sortedManifest(state.manifests.get(language) || {})), 'application/json');
+  }
+  state.importMetadata.version = 1;
+  setOverride('content/video-import-metadata.json', jsonText(state.importMetadata), 'application/json');
+  const config = structuredClone(state.config);
+  config.features = config.features && typeof config.features === 'object' ? config.features : {};
+  config.features.signLanguage = [...state.manifests.values()].some((manifest) => Object.keys(manifest || {}).length > 0);
+  config.bundleVersion = nextBundleVersion(config.bundleVersion);
+  state.config = config;
+  setOverride('assets/config.json', jsonText(config), 'application/json');
+  await regenerateOfflinePreloader();
+}
+
+function removeImportRecordsForMedia(media) {
+  for (const [videoId, record] of Object.entries(state.importMetadata.videos || {})) {
+    if (media.videoIds?.includes(videoId) || record?.filename === media.filename) delete state.importMetadata.videos[videoId];
+  }
+}
+
+function removeIncomingMedia(media) {
+  const page = state.pages.find((candidate) => candidate.sectionId === media.pageId);
+  const message = page
+    ? `${media.filename} is staged for ${page.title}. Remove the incoming video and its page assignment?`
+    : `Remove ${media.filename} from the incoming video list?`;
+  if (!confirm(message)) return;
+  state.incoming = state.incoming.filter((item) => item.id !== media.id);
+  if (state.selectedMediaId === media.id) state.selectedMediaId = '';
+  renderAll();
+  toast(`${media.filename} was removed from the incoming list.`);
+}
+
+async function unlinkExistingMedia(media) {
+  const pageNames = media.pageIds.map((id) => state.pages.find((page) => page.sectionId === id)?.title || id);
+  if (!confirm(`${media.filename} is linked to ${pageNames.length} page${pageNames.length === 1 ? '' : 's'}: ${pageNames.join(', ')}. Unlink it first? The video file will remain in the project until you click its trash icon again.`)) return;
+  for (const language of state.languages) {
+    const manifest = state.manifests.get(language) || {};
+    for (const [videoId, filename] of Object.entries(manifest)) {
+      if (filename === media.filename) delete manifest[videoId];
+    }
+    state.manifests.set(language, manifest);
+  }
+  removeImportRecordsForMedia(media);
+  await stageVideoCatalogChanges();
+  await rebuildExistingMedia();
+  const refreshed = state.existing.find((item) => item.filename === media.filename);
+  state.selectedMediaId = refreshed?.id || '';
+  renderAll();
+  toast(`${media.filename} is now unlinked. Click its trash icon again to delete the file.`);
+}
+
+async function deleteExistingMedia(media) {
+  if (media.pageIds.length) {
+    await unlinkExistingMedia(media);
+    return;
+  }
+  if (!confirm(`Permanently delete the unlinked video file ${media.filename} from every language in this ADT?`)) return;
+  for (const path of listProjectPaths()) {
+    if (/^content\/i18n\/[^/]+\/video\//.test(path) && path.endsWith(`/${media.filename}`)) setDeletion(path);
+  }
+  removeImportRecordsForMedia(media);
+  await stageVideoCatalogChanges();
+  await rebuildExistingMedia();
+  if (state.selectedMediaId === media.id) state.selectedMediaId = '';
+  renderAll();
+  toast(`${media.filename} is staged for deletion. Save or download the ADT to finish.`);
+}
+
+async function deleteMedia(id) {
+  const media = [...state.incoming, ...state.existing].find((item) => item.id === id);
+  if (!media) return;
+  if (media.kind === 'incoming') removeIncomingMedia(media);
+  else await deleteExistingMedia(media);
+}
+
+async function deleteAllVideos() {
+  const total = state.incoming.length + state.existing.length;
+  if (!total) return;
+  if (!confirm(`Delete all ${total} incoming and existing video${total === 1 ? '' : 's'}? This will clear every page link and remove every sign-language video file when you save or download the ADT.`)) return;
+  state.incoming = [];
+  for (const language of state.languages) state.manifests.set(language, {});
+  for (const path of listProjectPaths()) {
+    if (/^content\/i18n\/[^/]+\/video\/[^/]+$/.test(path) && VIDEO_INPUT_EXTENSIONS.has(fileExtension(path))) setDeletion(path);
+  }
+  state.importMetadata.videos = {};
+  await stageVideoCatalogChanges();
+  await rebuildExistingMedia();
+  state.selectedMediaId = '';
+  renderAll();
+  toast('All video links and files are staged for deletion. Save or download the ADT to finish.');
 }
 
 async function applyAssignments({ askToReplace = true } = {}) {
@@ -1274,6 +1525,20 @@ async function writeToDirectory(path, blob) {
   state.files.set(normalizePath(path), { handle: fileHandle });
 }
 
+async function deleteFromDirectory(path) {
+  const normalized = normalizePath(path);
+  const pieces = normalized.split('/');
+  const name = pieces.pop();
+  let directory = state.rootHandle;
+  try {
+    for (const piece of pieces) directory = await directory.getDirectoryHandle(piece);
+    await directory.removeEntry(name);
+  } catch (error) {
+    if (error.name !== 'NotFoundError') throw error;
+  }
+  state.files.delete(normalized);
+}
+
 async function persistProject() {
   if (state.mode !== 'direct') throw new Error('Direct save is unavailable in compatible mode. Download the updated ADT ZIP instead.');
   if (!(await ensureWritablePermission())) throw new Error('Write permission was not granted for this folder.');
@@ -1283,7 +1548,13 @@ async function persistProject() {
     els.busyDetail.textContent = `${index + 1}/${entries.length} · ${path}`;
     await writeToDirectory(path, blob);
   }
+  const deletions = [...state.deletions];
+  for (let index = 0; index < deletions.length; index += 1) {
+    els.busyDetail.textContent = `${index + 1}/${deletions.length} · deleting ${deletions[index]}`;
+    await deleteFromDirectory(deletions[index]);
+  }
   state.overrides.clear();
+  state.deletions.clear();
   setDirty(false);
 }
 
@@ -1292,7 +1563,7 @@ async function saveProject() {
     setBusy(true, 'Saving project…', 'Preparing assigned videos');
     const applied = await applyAssignments();
     if (applied === -1) return;
-    if (!state.overrides.size) {
+    if (!state.overrides.size && !state.deletions.size) {
       toast('There are no project changes to save.');
       return;
     }
@@ -1458,16 +1729,12 @@ function selectPage(pageId) {
   renderSelectedPage();
 }
 
-function movePage(delta) {
-  const page = currentPage();
-  const target = page ? state.pages[page.position - 1 + delta] : null;
-  if (target) selectPage(target.sectionId);
-}
-
 els.openFolder.addEventListener('click', openDirectFolder);
 els.fallback.addEventListener('change', () => openFallbackFiles(els.fallback.files));
 els.addVideos.addEventListener('change', () => { addIncomingFiles(els.addVideos.files); els.addVideos.value = ''; });
 els.addVideoFolder.addEventListener('change', () => { addIncomingFiles(els.addVideoFolder.files); els.addVideoFolder.value = ''; });
+els.autoAssignAll.addEventListener('click', autoAssignAllIncoming);
+els.deleteAllVideos.addEventListener('click', () => deleteAllVideos().catch((error) => toast(error.message, 'error')));
 els.optimizeSelected.addEventListener('click', () => optimizeBatch([currentMedia()]));
 els.optimizeAll.addEventListener('click', () => optimizeBatch([...state.incoming]));
 for (const input of document.querySelectorAll('input[name="optimize-audio"]')) {
@@ -1504,6 +1771,12 @@ els.pageList.addEventListener('click', (event) => {
   if (row) selectPage(row.dataset.pageId);
 });
 els.mediaPanel.addEventListener('click', (event) => {
+  const deletion = event.target.closest('[data-delete-id]');
+  if (deletion) {
+    event.stopPropagation();
+    deleteMedia(deletion.dataset.deleteId).catch((error) => toast(error.message, 'error'));
+    return;
+  }
   const info = event.target.closest('[data-info-id]');
   if (info) { event.stopPropagation(); showMediaInfo(info.dataset.infoId); return; }
   const row = event.target.closest('[data-media-id]');
@@ -1524,31 +1797,52 @@ els.assignmentAction.addEventListener('click', () => {
   const media = currentMedia();
   if (media?.kind === 'incoming') assignMediaToPage(media, els.assignmentSelect.value);
 });
-els.removeIncoming.addEventListener('click', () => {
-  const media = currentMedia();
-  if (media?.kind !== 'incoming') return;
-  state.incoming = state.incoming.filter((item) => item.id !== media.id);
-  state.selectedMediaId = '';
-  renderAll();
-});
 els.languageOptions.addEventListener('change', (event) => {
   if (event.target.checked) state.selectedLanguages.add(event.target.value);
   else state.selectedLanguages.delete(event.target.value);
   setDirty(true);
 });
-els.previousPage.addEventListener('click', () => movePage(-1));
-els.nextPage.addEventListener('click', () => movePage(1));
 els.videoPlayer.addEventListener('loadedmetadata', () => { els.previewDuration.textContent = formatDuration(els.videoPlayer.duration); });
+els.readerFrame.addEventListener('load', () => {
+  if (!els.readerFrame.dataset.readerKey) return;
+  if (state.readerBridgeUrl) URL.revokeObjectURL(state.readerBridgeUrl);
+  state.readerBridgeUrl = '';
+  showReaderState('ready', '', '');
+  installReaderSignBridge();
+  try {
+    const url = new URL(els.readerFrame.contentWindow.location.href);
+    const pieces = url.pathname.split('/').filter(Boolean);
+    const marker = pieces.indexOf('__adt_reader__');
+    if (marker < 0 || decodeURIComponent(pieces[marker + 1] || '') !== state.readerSessionId) return;
+    const path = pieces.slice(marker + 2).map(decodeURIComponent).join('/');
+    const page = state.pages.find((candidate) => normalizePath(candidate.href) === normalizePath(path));
+    if (!page || page.sectionId === state.selectedPageId) return;
+    state.selectedPageId = page.sectionId;
+    updateSelectedPageHeading(page);
+    renderPageList();
+    const attached = state.incoming.find((media) => media.pageId === page.sectionId)
+      || state.existing.find((media) => media.pageIds.includes(page.sectionId));
+    selectMedia(attached?.id || '');
+  } catch { /* Cross-frame inspection is optional; the reader remains usable. */ }
+});
+els.readerFrame.addEventListener('error', () => {
+  showReaderState('error', 'Could not open the ADT Reader', 'Try reopening the project or refreshing the tool.');
+});
 
 let mediaScrollFrame = 0;
 function updateStickyVideoPreview() {
   mediaScrollFrame = 0;
-  els.mediaPanel.classList.toggle('video-pip', els.mediaPanel.scrollTop > 120 && window.innerWidth > 900);
+  const isCompact = els.mediaPanel.classList.contains('video-pip');
+  const shouldCompact = window.innerWidth > 900 && (isCompact ? els.mediaPanel.scrollTop > 55 : els.mediaPanel.scrollTop > 175);
+  els.mediaPanel.classList.toggle('video-pip', shouldCompact);
 }
 els.mediaPanel.addEventListener('scroll', () => {
   if (!mediaScrollFrame) mediaScrollFrame = requestAnimationFrame(updateStickyVideoPreview);
 }, { passive: true });
-window.addEventListener('resize', updateStickyVideoPreview);
+window.addEventListener('resize', () => {
+  updateStickyVideoPreview();
+  if (els.readerFrame.dataset.readerKey) installReaderSignBridge();
+});
 
 if (window.showDirectoryPicker && window.isSecureContext) {
   els.compatibility.textContent = 'Direct folder save is available in this browser. You can also use compatible mode and download a ZIP.';

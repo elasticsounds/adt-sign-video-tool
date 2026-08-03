@@ -82,14 +82,8 @@
           <div><h1 id="selected-page-title">Choose a page</h1><p id="selected-page-meta"></p></div>
         </div>
         <div class="page-preview">
-          <div class="preview-label"><span>Textbook</span><strong>ADT page</strong></div>
-          <div class="page-paper" id="page-paper">
-            <div class="page-copy"><h2>Select a page to preview its text.</h2></div>
-          </div>
-          <footer class="page-nav">
-            <span id="page-nav-title">—</span>
-            <div><button id="previous-page" aria-label="Previous page">‹</button><strong id="page-position">0/0</strong><button id="next-page" aria-label="Next page">›</button></div>
-          </footer>
+          <iframe id="adt-reader-frame" title="ADT Reader preview" allow="autoplay" loading="eager"></iframe>
+          <div class="reader-state" id="reader-state"><span class="spinner"></span><strong>Opening the ADT Reader…</strong><small>Reader controls, languages, text-to-speech, and sign language will appear here.</small></div>
         </div>
       </section>
 
@@ -108,11 +102,15 @@
         <section class="media-browser">
           <div class="media-browser-heading">
             <div><strong>Project media</strong><small id="media-summary"></small></div>
-            <span class="count" id="media-count">0</span>
+            <div class="media-heading-actions">
+              <button class="icon-button danger" id="delete-all-videos" title="Delete all videos" aria-label="Delete all videos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg></button>
+              <span class="count" id="media-count">0</span>
+            </div>
           </div>
           <div class="media-actions">
             <label class="button primary" for="add-videos">Add videos</label>
             <label class="button secondary" for="add-video-folder">Add folder + auto-assign</label>
+            <button class="button secondary" id="auto-assign-all">Auto-assign all</button>
             <input id="add-videos" type="file" accept="video/*,.mp4,.webm,.mov,.m4v,.avi,.mkv" multiple hidden>
             <input id="add-video-folder" type="file" accept="video/*,.mp4,.webm,.mov,.m4v,.avi,.mkv" webkitdirectory multiple hidden>
           </div>
@@ -157,7 +155,6 @@
             <p class="editor-help" id="editor-help">The page selected on the left will be preselected here.</p>
             <div class="assignment-summary" id="assignment-summary">No staged video assignments.</div>
             <div class="language-box"><strong>Copy to languages</strong><div id="language-options"></div></div>
-            <button class="button secondary full hidden" id="remove-incoming">Remove selected incoming video</button>
           </div>
         </details>
       </aside>
