@@ -22,6 +22,8 @@ Then open <http://localhost:8080>. GitHub Pages deployment is automated by [`.gi
 
 The static edition uses one sign-language preset: H.264 MP4, maximum 960 px, 30 fps, CRF 24, with voice-over audio kept by default as mono AAC. Users can choose to remove audio. Use the Python app when frame-accurate trimming or Whisper transcription is needed.
 
+When a video folder is added, the browser edition auto-matches unique pages using prior import records, section IDs, video/page indexes, and page titles. Matches remain staged and reviewable; **Save to folder** or **Download ADT ZIP** writes every staged assignment into the ADT.
+
 The tool understands the exported ADT format used by the included *Weather and Climate Reader* sample:
 
 - `content/pages.json` defines the ordered sections.

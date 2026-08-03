@@ -7,7 +7,7 @@ const els = {
   pageSearch: $('#page-search'), pageList: $('#page-list'), selectedPageTitle: $('#selected-page-title'),
   selectedPageMeta: $('#selected-page-meta'), pagePaper: $('#page-paper'), pageNavTitle: $('#page-nav-title'),
   pagePosition: $('#page-position'), previousPage: $('#previous-page'), nextPage: $('#next-page'),
-  assignSelected: $('#assign-selected'), mediaCount: $('#media-count'), mediaSummary: $('#media-summary'),
+  mediaCount: $('#media-count'), mediaSummary: $('#media-summary'),
   mediaFilters: $('#media-filters'), mediaList: $('#media-list'), videoPlayer: $('#video-player'),
   videoEmpty: $('#video-empty'), previewStatus: $('#preview-status'), previewName: $('#preview-name'),
   previewDuration: $('#preview-duration'), addVideos: $('#add-videos'), addVideoFolder: $('#add-video-folder'),
@@ -15,8 +15,9 @@ const els = {
   batchProgress: $('#batch-progress'), batchProgressTitle: $('#batch-progress-title'),
   batchProgressValue: $('#batch-progress-value'), batchProgressBar: $('#batch-progress-bar'),
   batchProgressDetail: $('#batch-progress-detail'),
-  editorName: $('#editor-name'), assignmentSelect: $('#assignment-select'), editorHelp: $('#editor-help'),
-  removeIncoming: $('#remove-incoming'), languageOptions: $('#language-options'), applyProject: $('#apply-project'),
+  editorName: $('#editor-name'), assignmentSelect: $('#assignment-select'), assignmentAction: $('#assignment-action'),
+  assignmentContext: $('#assignment-context'), assignmentSummary: $('#assignment-summary'), editorHelp: $('#editor-help'),
+  removeIncoming: $('#remove-incoming'), languageOptions: $('#language-options'),
   saveProject: $('#save-project'), downloadProject: $('#download-project'), changeProject: $('#change-project'),
   brandHome: $('#brand-home'), infoDialog: $('#media-info-dialog'), infoTitle: $('#info-title'),
   mediaInfo: $('#media-info'), busy: $('#busy-overlay'), busyTitle: $('#busy-title'),
@@ -42,6 +43,7 @@ const state = {
   selectedMediaId: '',
   pageFilter: 'all',
   mediaFilter: 'all',
+  openMediaGroups: new Set(['incoming', 'existing']),
   pageImageUrl: '',
   previewUrl: '',
   previewToken: 0,
@@ -266,6 +268,7 @@ function resetProjectState() {
     config: {}, pages: [], languages: [], selectedLanguages: new Set(), manifests: new Map(),
     texts: {}, importMetadata: { version: 1, videos: {} }, existing: [], incoming: [],
     selectedPageId: '', selectedMediaId: '', pageFilter: 'all', mediaFilter: 'all',
+    openMediaGroups: new Set(['incoming', 'existing']),
     pageImageUrl: '', previewUrl: '', previewToken: 0, audioMode: 'keep', optimizing: false,
     batchProgress: null, dirty: false
   });
@@ -427,14 +430,12 @@ function renderPageList() {
 async function renderSelectedPage() {
   const page = currentPage();
   if (!page) return;
-  const status = pageStatus(page);
   els.selectedPageTitle.textContent = page.title;
   els.selectedPageMeta.textContent = `video-${page.position} · ${page.sectionId}${page.pageNumber === null ? '' : ` · print page ${page.pageNumber}`}`;
   els.pageNavTitle.textContent = page.title;
   els.pagePosition.textContent = `${page.position}/${state.pages.length}`;
   els.previousPage.disabled = page.position === 1;
   els.nextPage.disabled = page.position === state.pages.length;
-  els.assignSelected.disabled = currentMedia()?.kind !== 'incoming';
   if (state.pageImageUrl) { URL.revokeObjectURL(state.pageImageUrl); state.pageImageUrl = ''; }
   const token = ++state.previewToken;
   els.pagePaper.innerHTML = '<div class="page-copy"><h2>Loading page…</h2></div>';
@@ -496,7 +497,6 @@ async function renderSelectedPage() {
   const existingForPage = state.existing.find((media) => media.pageIds.includes(page.sectionId));
   if (incomingForPage && state.selectedMediaId !== incomingForPage.id) selectMedia(incomingForPage.id);
   else if (!currentMedia() && existingForPage) selectMedia(existingForPage.id);
-  els.assignSelected.textContent = status.type === 'incoming' ? 'Incoming clip assigned here' : 'Assign selected clip here';
 }
 
 function mediaNeedsOptimization(media) {
@@ -540,6 +540,8 @@ function renderMediaList() {
       const pageIds = media.kind === 'incoming' ? (media.pageId ? [media.pageId] : []) : media.pageIds;
       const page = state.pages.find((candidate) => candidate.sectionId === pageIds[0]);
       const linked = pageIds.length > 0;
+      const linkLabel = media.kind === 'incoming' && media.assignmentMethod === 'auto' ? 'Auto-assigned' : linked ? 'Linked' : 'Unlinked';
+      const assignmentTitle = media.kind === 'incoming' && media.assignmentReason ? ` title="${escapeHtml(media.assignmentReason)}"` : '';
       const facts = [
         media.metadata?.duration ? formatDuration(media.metadata.duration) : 'duration…',
         formatBytes(media.size),
@@ -563,33 +565,68 @@ function renderMediaList() {
         <span class="media-index">${globalIndex}</span>
         <span class="media-main"><strong>${escapeHtml(media.filename)}</strong><small>${linked ? escapeHtml(`${page?.title || pageIds[0]}${pageIds.length > 1 ? ` +${pageIds.length - 1}` : ''}`) : 'Not linked to a page'}</small>
         <span class="media-facts">${facts.map((fact) => `<span>• ${escapeHtml(fact)}</span>`).join('')}</span>
-        <span class="status-chip ${linked ? 'linked' : 'unlinked'}">${linked ? 'Linked' : 'Unlinked'}</span>${optimizeStatus ? ` <span class="status-chip ${optimizeStatus.type}">${optimizeStatus.label}</span>` : ''}</span>
+        <span class="status-chip ${linked ? 'linked' : 'unlinked'}"${assignmentTitle}>${linkLabel}</span>${optimizeStatus ? ` <span class="status-chip ${optimizeStatus.type}">${optimizeStatus.label}</span>` : ''}</span>
         <button class="info-button" data-info-id="${escapeHtml(media.id)}" title="Media information" aria-label="Media information for ${escapeHtml(media.filename)}">i</button>
         ${optimizationRow}
       </div>`;
     }).join('');
-    return `<div class="media-group-title">${title} (${rows.length})</div>${content}`;
+    const open = state.openMediaGroups.has(kind) ? ' open' : '';
+    return `<details class="media-group" data-media-group="${kind}"${open}><summary class="media-group-title"><span>${title} (${rows.length})</span><span class="disclosure" aria-hidden="true">⌄</span></summary><div class="media-group-content">${content}</div></details>`;
   }).join('') || '<p class="panel-summary">No videos in this view.</p>';
+}
+
+function updateAssignmentAction() {
+  const media = currentMedia();
+  const editable = media?.kind === 'incoming';
+  const targetId = els.assignmentSelect.value;
+  const targetPage = state.pages.find((page) => page.sectionId === targetId);
+  els.assignmentAction.disabled = !editable || state.optimizing || targetId === (media?.pageId || '');
+  if (!editable) {
+    els.assignmentAction.textContent = media ? 'Existing ADT video is read-only' : 'Select an incoming video';
+  } else if (!targetId) {
+    els.assignmentAction.textContent = media.pageId ? 'Remove page assignment' : 'Leave video unassigned';
+  } else if (targetId === media.pageId) {
+    els.assignmentAction.textContent = `Assigned to ${targetPage?.position || ''}. ${targetPage?.title || targetId}`;
+  } else {
+    els.assignmentAction.textContent = `${media.pageId ? 'Move' : 'Assign'} video to ${targetPage?.position || ''}. ${targetPage?.title || targetId}`;
+  }
 }
 
 function renderEditor() {
   const media = currentMedia();
+  const page = currentPage();
   const editable = media?.kind === 'incoming';
+  const targetId = editable
+    ? (media.assignmentTarget !== undefined ? media.assignmentTarget : (media.pageId || page?.sectionId || ''))
+    : '';
   els.editorName.textContent = media?.filename || 'No video selected';
   els.removeIncoming.classList.toggle('hidden', !editable);
   els.removeIncoming.disabled = state.optimizing;
   els.assignmentSelect.disabled = !editable;
-  els.assignmentSelect.innerHTML = '<option value="">Choose a page…</option>' + state.pages.map((page) => {
-    const print = page.pageNumber === null ? '' : ` · print p. ${page.pageNumber}`;
-    return `<option value="${escapeHtml(page.sectionId)}" ${editable && media.pageId === page.sectionId ? 'selected' : ''}>${page.position}. ${escapeHtml(page.title)}${print}</option>`;
+  els.assignmentContext.textContent = page
+    ? `Selected on the left: ${page.position}. ${page.title} · ${page.sectionId}`
+    : 'Select a page on the left, then choose an incoming video.';
+  els.assignmentSelect.innerHTML = '<option value="">Leave unassigned</option>' + state.pages.map((candidate) => {
+    const print = candidate.pageNumber === null ? '' : ` · print p. ${candidate.pageNumber}`;
+    return `<option value="${escapeHtml(candidate.sectionId)}" ${targetId === candidate.sectionId ? 'selected' : ''}>${candidate.position}. ${escapeHtml(candidate.title)}${print}</option>`;
   }).join('');
-  els.editorHelp.textContent = editable
-    ? mediaNeedsOptimization(media)
-      ? 'Optimize this source for the ADT, then assign it to a page. The original recording is preserved in memory.'
-      : `Optimized for sign-language playback with ${media.optimization.audioMode === 'keep' ? 'audio kept' : 'audio removed'}.`
-    : media ? 'Existing ADT media is read-only here. Add a replacement video to change this page.' : 'Select an incoming video to assign it to a page.';
+  if (editable && media.pageId) {
+    els.editorHelp.textContent = media.assignmentMethod === 'auto'
+      ? `Automatically matched using ${media.assignmentReason || 'the video filename'}. Choose another page above if the match is wrong.`
+      : 'This page assignment is staged. Choose another page above if it needs to change.';
+  } else if (editable) {
+    els.editorHelp.textContent = 'The page selected on the left is preselected. Confirm the assignment with the button above.';
+  } else {
+    els.editorHelp.textContent = media
+      ? 'Existing ADT media is read-only here. Select an incoming video to replace or add a page video.'
+      : 'Select an incoming video from the browser above.';
+  }
   const assigned = state.incoming.filter((item) => item.pageId);
-  els.applyProject.disabled = !assigned.length || assigned.some(mediaNeedsOptimization) || state.optimizing;
+  const pendingOptimization = assigned.filter(mediaNeedsOptimization).length;
+  els.assignmentSummary.textContent = assigned.length
+    ? `${assigned.length} video assignment${assigned.length === 1 ? '' : 's'} staged${pendingOptimization ? ` · ${pendingOptimization} still need optimization` : ''}. Save to folder or Download ADT ZIP when ready.`
+    : 'No staged video assignments. Save and Download automatically include every staged assignment.';
+  updateAssignmentAction();
   renderOptimizer();
 }
 
@@ -624,6 +661,7 @@ function renderLanguageOptions() {
 async function selectMedia(id, rerender = true) {
   state.selectedMediaId = id;
   const media = currentMedia();
+  if (media) state.openMediaGroups.add(media.kind);
   if (rerender) { renderMediaList(); renderEditor(); }
   if (state.previewUrl) { URL.revokeObjectURL(state.previewUrl); state.previewUrl = ''; }
   els.videoPlayer.pause();
@@ -873,57 +911,162 @@ async function optimizeBatch(mediaList) {
   }
 }
 
+function filenameStem(value) {
+  return String(value || '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
+}
+
+function matchText(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function simplifiedVideoTitle(value) {
+  return matchText(filenameStem(value))
+    .replace(/^(?:sl|sign language|sign|video|clip|recording)\s+/, '')
+    .replace(/\s+(?:sl|sign language|sign video|video|clip|recording)$/, '')
+    .trim();
+}
+
+function pageFromImportRecord(videoId, record) {
+  const sectionId = String(record?.section_id || '');
+  const bySection = state.pages.find((page) => page.sectionId.toLowerCase() === sectionId.toLowerCase());
+  if (bySection) return bySection;
+  const position = Number(String(videoId).match(/(\d+)$/)?.[1]);
+  return position ? state.pages[position - 1] || null : null;
+}
+
 function detectPageForFilename(filename) {
-  const stem = filename.replace(/\.[^.]+$/, '').toLowerCase();
-  const explicit = stem.match(/pg\d+_sec\d+|qz\d+/i)?.[0].toLowerCase();
-  if (explicit) {
-    const page = state.pages.find((candidate) => candidate.sectionId.toLowerCase() === explicit);
-    if (page) return page.sectionId;
+  const stem = filenameStem(filename);
+  const normalizedStem = matchText(stem);
+  const simplifiedStem = simplifiedVideoTitle(stem);
+  const previousName = matchText(stem);
+  for (const [videoId, record] of Object.entries(state.importMetadata.videos || {})) {
+    if (!record || typeof record !== 'object') continue;
+    const recordedNames = [record.source_name, record.filename].filter(Boolean).map((value) => matchText(filenameStem(value)));
+    if (!recordedNames.includes(previousName)) continue;
+    const page = pageFromImportRecord(videoId, record);
+    if (page) return { pageId: page.sectionId, score: 1000, reason: 'a previous import record' };
   }
-  const position = Number(stem.match(/(?:^|[^a-z0-9])video[-_ ]?(\d+)(?:[^a-z0-9]|$)/i)?.[1]);
-  if (position && state.pages[position - 1]) return state.pages[position - 1].sectionId;
-  const pagePrefix = stem.match(/(?:^|[^a-z0-9])(pg\d+)(?:[^a-z0-9]|$)/i)?.[1];
+
+  const sectionMatches = state.pages.filter((page) => {
+    const section = matchText(page.sectionId);
+    return section.length >= 4 && (` ${normalizedStem} `).includes(` ${section} `);
+  });
+  if (sectionMatches.length === 1) {
+    const page = sectionMatches[0];
+    return { pageId: page.sectionId, score: 950, reason: `section ID ${page.sectionId}` };
+  }
+
+  const pagePrefix = stem.match(/(?:^|[^a-z0-9])(pg\d+)(?:[^a-z0-9]|$)/i)?.[1]?.toLowerCase();
   if (pagePrefix) {
-    const candidates = state.pages.filter((page) => page.sectionId.toLowerCase().startsWith(`${pagePrefix}_`));
-    if (candidates.length === 1) return candidates[0].sectionId;
+    const prefixMatches = state.pages.filter((page) => page.sectionId.toLowerCase().startsWith(`${pagePrefix}_`));
+    if (prefixMatches.length === 1) {
+      const page = prefixMatches[0];
+      return { pageId: page.sectionId, score: 900, reason: `page ID ${pagePrefix}` };
+    }
   }
-  return '';
+
+  const indexMatch = stem.match(/(?:^|[^a-z0-9])(?:video|index|page|section|clip)[-_ ]*0*(\d+)(?:[^a-z0-9]|$)/i)
+    || stem.match(/^0*(\d+)(?:[-_ .]|$)/);
+  const position = Number(indexMatch?.[1]);
+  if (position && state.pages[position - 1]) {
+    const page = state.pages[position - 1];
+    return { pageId: page.sectionId, score: 850, reason: `video index ${position}` };
+  }
+
+  const titleMatches = state.pages.map((page) => {
+    const title = matchText(page.title);
+    if (!title) return null;
+    if (simplifiedStem === title) return { page, score: 800 };
+    if (title.length >= 4 && (` ${simplifiedStem} `).includes(` ${title} `)) return { page, score: 760 + Math.min(30, title.length) };
+    const tokens = title.split(' ').filter((token) => token.length >= 3);
+    const stemTokens = new Set(simplifiedStem.split(' '));
+    if (tokens.length && tokens.every((token) => stemTokens.has(token)) && (tokens.length > 1 || tokens[0].length >= 6)) {
+      return { page, score: 650 + Math.min(50, tokens.join('').length) };
+    }
+    return null;
+  }).filter(Boolean).sort((a, b) => b.score - a.score);
+  if (titleMatches.length && (titleMatches.length === 1 || titleMatches[0].score > titleMatches[1].score)) {
+    const match = titleMatches[0];
+    return { pageId: match.page.sectionId, score: match.score, reason: `page title “${match.page.title}”` };
+  }
+  return null;
+}
+
+function autoAssignmentsForFiles(files) {
+  const usedPages = new Set(state.incoming.filter((media) => media.pageId).map((media) => media.pageId));
+  const proposals = files.map((file) => ({ file, match: detectPageForFilename(file.name) }))
+    .filter((proposal) => proposal.match)
+    .sort((a, b) => b.match.score - a.match.score || naturalCompare(a.file.name, b.file.name));
+  const assignments = new Map();
+  for (const proposal of proposals) {
+    if (usedPages.has(proposal.match.pageId)) continue;
+    assignments.set(proposal.file, proposal.match);
+    usedPages.add(proposal.match.pageId);
+  }
+  return assignments;
 }
 
 async function addIncomingFiles(fileList) {
-  const files = [...fileList].filter((file) => file.type.startsWith('video/') || VIDEO_INPUT_EXTENSIONS.has(fileExtension(file.name)));
+  const files = [...fileList]
+    .filter((file) => file.type.startsWith('video/') || VIDEO_INPUT_EXTENSIONS.has(fileExtension(file.name)))
+    .sort((a, b) => naturalCompare(a.name, b.name));
   if (!files.length) {
     toast('No supported video files were found. Choose MP4, WebM, MOV, M4V, AVI, or MKV recordings.', 'error');
     return;
   }
-  for (const file of files.sort((a, b) => naturalCompare(a.name, b.name))) {
+  const autoAssignments = autoAssignmentsForFiles(files);
+  const added = [];
+  for (const file of files) {
+    const autoMatch = autoAssignments.get(file) || null;
     const media = {
       id: `incoming:${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`,
       kind: 'incoming', filename: file.name, file, sourceFile: file, sourceFilename: file.name,
-      size: file.size, modified: file.lastModified, pageId: detectPageForFilename(file.name),
+      size: file.size, modified: file.lastModified, pageId: autoMatch?.pageId || '',
+      assignmentMethod: autoMatch ? 'auto' : '', assignmentReason: autoMatch?.reason || '',
       metadata: null, optimization: null
     };
     state.incoming.push(media);
+    added.push(media);
     probeMedia(media).then(() => renderMediaList()).catch(() => {});
   }
   state.batchProgress = null;
   state.selectedMediaId = state.incoming.at(-1).id;
+  state.openMediaGroups.add('incoming');
   state.mediaFilter = 'all';
   syncSegmented(els.mediaFilters, 'all');
   renderAll();
   await selectMedia(state.selectedMediaId);
-  toast(`Added ${files.length} incoming video${files.length === 1 ? '' : 's'}. Choose Optimize all incoming when the batch is ready.`);
+  const matched = added.filter((media) => media.pageId).length;
+  setDirty(true);
+  toast(`Added ${files.length} incoming video${files.length === 1 ? '' : 's'} · ${matched} auto-assigned${files.length - matched ? ` · ${files.length - matched} need a page` : ''}. Review the matches, then optimize the batch.`);
 }
 
-function assignMediaToPage(media, pageId) {
+function assignMediaToPage(media, pageId, { method = 'manual', reason = 'selected by the user' } = {}) {
   if (!media || media.kind !== 'incoming') return;
+  const displaced = pageId ? state.incoming.find((item) => item.id !== media.id && item.pageId === pageId) : null;
+  if (displaced) {
+    displaced.pageId = '';
+    displaced.assignmentTarget = undefined;
+    displaced.assignmentMethod = '';
+    displaced.assignmentReason = '';
+  }
   media.pageId = pageId;
+  media.assignmentTarget = pageId;
+  media.assignmentMethod = pageId ? method : '';
+  media.assignmentReason = pageId ? reason : '';
   if (pageId) state.selectedPageId = pageId;
   setDirty(true);
   renderPageList();
   renderSelectedPage();
   renderMediaList();
   renderEditor();
+  if (displaced) toast(`${displaced.filename} was unassigned because each page can have one incoming video.`);
 }
 
 function mediaInfoRows(media) {
@@ -936,6 +1079,7 @@ function mediaInfoRows(media) {
     ['Project status', media.kind === 'incoming' ? optimized ? 'Incoming — optimized and ready' : 'Incoming — optimization pending' : media.missing ? 'Referenced file is missing' : 'Existing in ADT'],
     ['File name', media.filename],
     ['Assigned page', pages],
+    ...(media.kind === 'incoming' && media.pageId ? [['Assignment method', media.assignmentMethod === 'auto' ? `Automatic · ${media.assignmentReason || 'filename match'}` : 'Manual']] : []),
     ['File size', formatBytes(media.size)],
     ...(optimized ? [
       ['Original file', media.sourceFilename],
@@ -1013,6 +1157,8 @@ async function applyAssignments({ askToReplace = true } = {}) {
       source_size: media.sourceFile?.size || media.file.size,
       preset: 'optimize-video',
       audio_mode: media.optimization?.audioMode || 'keep',
+      assignment_method: media.assignmentMethod || 'manual',
+      assignment_reason: media.assignmentReason || 'selected by the user',
       trim_start: null,
       trim_end: null
     };
@@ -1299,6 +1445,7 @@ function selectPage(pageId) {
   const existing = state.existing.find((media) => media.pageIds.includes(pageId));
   const media = incoming || existing;
   if (media) selectMedia(media.id);
+  else renderEditor();
   renderPageList();
   renderSelectedPage();
 }
@@ -1329,14 +1476,6 @@ els.changeProject.addEventListener('click', goHome);
 els.brandHome.addEventListener('click', (event) => { event.preventDefault(); if (!els.workspace.classList.contains('hidden')) goHome(); });
 els.saveProject.addEventListener('click', saveProject);
 els.downloadProject.addEventListener('click', downloadProject);
-els.applyProject.addEventListener('click', async () => {
-  try {
-    setBusy(true, 'Applying videos…', 'Updating ADT manifests and offline data');
-    const count = await applyAssignments();
-    if (count > 0) toast(`Applied ${count} video${count === 1 ? '' : 's'} to the project. Save the folder or download the ADT ZIP.`);
-  } catch (error) { toast(error.message, 'error'); }
-  finally { setBusy(false); }
-});
 els.pageSearch.addEventListener('input', renderPageList);
 els.pageFilters.addEventListener('click', (event) => {
   const button = event.target.closest('button[data-filter]');
@@ -1362,11 +1501,20 @@ els.mediaList.addEventListener('click', (event) => {
   const row = event.target.closest('[data-media-id]');
   if (row) selectMedia(row.dataset.mediaId);
 });
-els.assignmentSelect.addEventListener('change', () => assignMediaToPage(currentMedia(), els.assignmentSelect.value));
-els.assignSelected.addEventListener('click', () => {
+els.mediaList.addEventListener('toggle', (event) => {
+  const group = event.target.closest?.('[data-media-group]');
+  if (!group) return;
+  if (group.open) state.openMediaGroups.add(group.dataset.mediaGroup);
+  else state.openMediaGroups.delete(group.dataset.mediaGroup);
+}, true);
+els.assignmentSelect.addEventListener('change', () => {
   const media = currentMedia();
-  const page = currentPage();
-  if (media?.kind === 'incoming' && page) assignMediaToPage(media, page.sectionId);
+  if (media?.kind === 'incoming') media.assignmentTarget = els.assignmentSelect.value;
+  updateAssignmentAction();
+});
+els.assignmentAction.addEventListener('click', () => {
+  const media = currentMedia();
+  if (media?.kind === 'incoming') assignMediaToPage(media, els.assignmentSelect.value);
 });
 els.removeIncoming.addEventListener('click', () => {
   const media = currentMedia();

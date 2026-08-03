@@ -79,8 +79,7 @@
 
       <section class="review-panel">
         <div class="review-heading">
-          <div><span class="eyebrow">Review workspace</span><h1 id="selected-page-title">Choose a page</h1><p id="selected-page-meta"></p></div>
-          <button class="button secondary" id="assign-selected">Assign selected clip here</button>
+          <div><h1 id="selected-page-title">Choose a page</h1><p id="selected-page-meta"></p></div>
         </div>
         <div class="page-preview">
           <div class="preview-label"><span>Textbook</span><strong>ADT page</strong></div>
@@ -114,30 +113,32 @@
           <p class="panel-summary" id="media-summary"></p>
           <div class="media-actions">
             <label class="button primary" for="add-videos">Add videos</label>
-            <label class="button secondary" for="add-video-folder">Add a folder</label>
+            <label class="button secondary" for="add-video-folder">Add &amp; auto-assign folder</label>
             <input id="add-videos" type="file" accept="video/*,.mp4,.webm,.mov,.m4v,.avi,.mkv" multiple hidden>
             <input id="add-video-folder" type="file" accept="video/*,.mp4,.webm,.mov,.m4v,.avi,.mkv" webkitdirectory multiple hidden>
           </div>
-          <section class="optimizer-panel" aria-labelledby="optimizer-title">
-            <div class="optimizer-heading">
+          <details class="optimizer-panel collapsible-panel" open>
+            <summary class="optimizer-heading">
               <div><span class="optimizer-icon" aria-hidden="true">↯</span><div><strong id="optimizer-title">Optimize video</strong><small>H.264 MP4 · max 960 px · 30 fps</small></div></div>
-              <span class="engine-state" id="engine-state">Loads when needed</span>
+              <span class="collapsible-meta"><span class="engine-state" id="engine-state">Loads when needed</span><span class="disclosure" aria-hidden="true">⌄</span></span>
+            </summary>
+            <div class="collapsible-content">
+              <fieldset>
+                <legend>Audio in optimized videos</legend>
+                <label><input type="radio" name="optimize-audio" value="keep" checked><span><strong>Keep audio</strong><small>Recommended for voice-over</small></span></label>
+                <label><input type="radio" name="optimize-audio" value="remove"><span><strong>Remove audio</strong><small>Video only</small></span></label>
+              </fieldset>
+              <div class="optimizer-actions">
+                <button class="button secondary" id="optimize-selected">Optimize selected</button>
+                <button class="button primary" id="optimize-all">Optimize all incoming</button>
+              </div>
+              <div class="batch-progress hidden" id="batch-progress">
+                <div><strong id="batch-progress-title">Preparing optimizer…</strong><span id="batch-progress-value">0%</span></div>
+                <span class="progress-track"><span id="batch-progress-bar"></span></span>
+                <small id="batch-progress-detail">The first run downloads the local video engine.</small>
+              </div>
             </div>
-            <fieldset>
-              <legend>Audio in optimized videos</legend>
-              <label><input type="radio" name="optimize-audio" value="keep" checked><span><strong>Keep audio</strong><small>Recommended for voice-over</small></span></label>
-              <label><input type="radio" name="optimize-audio" value="remove"><span><strong>Remove audio</strong><small>Video only</small></span></label>
-            </fieldset>
-            <div class="optimizer-actions">
-              <button class="button secondary" id="optimize-selected">Optimize selected</button>
-              <button class="button primary" id="optimize-all">Optimize all incoming</button>
-            </div>
-            <div class="batch-progress hidden" id="batch-progress">
-              <div><strong id="batch-progress-title">Preparing optimizer…</strong><span id="batch-progress-value">0%</span></div>
-              <span class="progress-track"><span id="batch-progress-bar"></span></span>
-              <small id="batch-progress-detail">The first run downloads the local video engine.</small>
-            </div>
-          </section>
+          </details>
           <div class="segmented" id="media-filters" role="group" aria-label="Filter videos">
             <button class="active" data-filter="all">All</button>
             <button data-filter="incoming">Incoming</button>
@@ -146,13 +147,18 @@
           <div class="media-list" id="media-list"></div>
         </section>
 
-        <section class="clip-editor" id="clip-editor">
-          <div class="editor-heading"><div><span class="eyebrow">Selected clip</span><h3 id="editor-name">No video selected</h3></div><button class="icon-button hidden" id="remove-incoming" title="Remove incoming video" aria-label="Remove incoming video">×</button></div>
-          <label>Assign to ADT page<select id="assignment-select"><option value="">Choose a page…</option></select></label>
-          <p class="editor-help" id="editor-help">Select an incoming video to assign it to a page.</p>
-          <div class="language-box"><strong>Copy to languages</strong><div id="language-options"></div></div>
-          <button class="button primary full" id="apply-project">Apply assigned videos</button>
-        </section>
+        <details class="clip-editor collapsible-panel" id="clip-editor" open>
+          <summary class="editor-heading"><div><span class="eyebrow">Selected video &amp; page</span><h3 id="editor-name">No video selected</h3></div><span class="disclosure" aria-hidden="true">⌄</span></summary>
+          <div class="collapsible-content">
+            <div class="assignment-context" id="assignment-context">Select a page on the left, then choose an incoming video.</div>
+            <label>Page for this video<select id="assignment-select"><option value="">Leave unassigned</option></select></label>
+            <button class="button primary full" id="assignment-action">Select an incoming video</button>
+            <p class="editor-help" id="editor-help">The page selected on the left will be preselected here.</p>
+            <div class="assignment-summary" id="assignment-summary">No staged video assignments.</div>
+            <div class="language-box"><strong>Copy to languages</strong><div id="language-options"></div></div>
+            <button class="button secondary full hidden" id="remove-incoming">Remove selected incoming video</button>
+          </div>
+        </details>
       </aside>
     </section>
   </main>

@@ -39,6 +39,9 @@ Then open <http://localhost:8080>.
 - Files remain local to the browser. This app does not upload the ADT or videos.
 - **Optimize all incoming** converts a complete batch to H.264 MP4, maximum 960 px, 30 fps, CRF 24 and browser-compatible `yuv420p` video.
 - Audio is kept by default as lightweight mono AAC. The user can explicitly choose **Remove audio** before optimizing.
+- **Add & auto-assign folder** matches unique pages using previous import records, section IDs, video/page indexes, and page titles. Uncertain or conflicting matches remain unassigned for review.
+- Page assignment is staged in the selected-video panel. The page selected on the left is preselected, and **Save to folder** or **Download ADT ZIP** automatically applies every staged assignment.
+- Optimization, incoming videos, existing videos, and selected-video controls can be collapsed to keep long projects manageable.
 - The conversion engine is downloaded from the same site on first use and is then eligible for the browser's normal HTTP cache.
 
 The browser edition accepts MP4, WebM, MOV, M4V, AVI and MKV inputs. Use the Python edition in the parent folder when frame-accurate trimming or optional Whisper voice-over transcription is needed.
